@@ -50,7 +50,7 @@ public static class DbWarmup
     private static void DecompressReferencesJson()
     {
         var fileExists = File.Exists(DestinationFile);
-        if (!fileExists) return;
+        if (fileExists) return;
 
         var sourceFile = Environment.GetEnvironmentVariable("REFERENCES_JSON_GZ_SOURCE_PATH") ??
             "/home/df/Projects/rinha-2026/antifraud/references.json.gz";
