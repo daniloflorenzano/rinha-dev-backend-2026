@@ -1,23 +1,28 @@
 using Antifraud;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
-var app = builder.Build();
 
 var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") ??
     "Username=postgres;Password=senha;Host=localhost;Port=5431;Database=postgres;Pooling=true;MaxPoolSize=15;Connection Lifetime=0;";
 
 var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
 dataSourceBuilder.UseVector();
-await using var dataSource = dataSourceBuilder.Build();
 
-await DbWarmup.PrepareDatabase(dataSource);
+var dataSource = dataSourceBuilder.Build();
+builder.Services.AddSingleton(dataSource);
 
-app.MapGet("/ready", () =>
-{
-    return Results.Ok();
-});
+var warmupTask = Task.Run(async () => await DbWarmup.PrepareDatabase(dataSource));
+
+builder.Services.AddHealthChecks()
+    .AddCheck("DbWarmup", () => 
+        warmupTask.IsCompletedSuccessfully ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy());
+
+var app = builder.Build();
+
+app.MapHealthChecks("/ready");
 
 app.MapPost("/fraud-score", ([FromBody]Request req) =>
 {
