@@ -2,6 +2,7 @@ using Antifraud;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
+using Pgvector;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,7 +25,7 @@ var app = builder.Build();
 
 app.MapHealthChecks("/ready");
 
-app.MapPost("/fraud-score", ([FromBody]Request req) =>
+app.MapPost("/fraud-score", async ([FromBody]Request req, [FromServices]NpgsqlDataSource source) =>
 {
     const int MaxAmount = 10000;
     const int MaxInsallments = 12;
@@ -34,7 +35,7 @@ app.MapPost("/fraud-score", ([FromBody]Request req) =>
     const int MaxTxCount24h = 20;
     const int MaxMerchantAvgAmount = 10000;
 
-    double[] vector = new double[14];
+    float[] vector = new float[14];
     var requestedAt = DateTime.Parse(req.transaction.requested_at).ToUniversalTime();
 
     vector[0] = Limitar(req.transaction.amount, MaxAmount);
@@ -52,19 +53,38 @@ app.MapPost("/fraud-score", ([FromBody]Request req) =>
     vector[12] = MccRisk(req.merchant.mcc);
     vector[13] = Limitar(req.merchant.avg_amount, MaxMerchantAvgAmount);
 
-    var res = new Response(true, 0.8);
+    await using var connection = await dataSource.OpenConnectionAsync();
+    var cmd = new NpgsqlCommand("SELECT label FROM items ORDER BY vector <-> $1 LIMIT 5", connection)
+    {
+        Parameters = { new() { Value = new Vector(vector)}}
+    };
+
+    var fraudNeighbors = 0f;
+    await using var reader = await cmd.ExecuteReaderAsync();
+
+    while (await reader.ReadAsync())
+    {
+        var label = reader.GetString(0);
+        if (string.Equals(label, "fraud"))
+            fraudNeighbors++;
+    }
+
+    var score = fraudNeighbors / 5;
+    var approved = score < 0.6;
+
+    var res = new Response(approved, score);
     return Results.Ok(res);
 });
 
 app.Run();
 
-static double Limitar(double amount, int max)
+static float Limitar(float amount, int max)
 {
     var v = amount / max;
-    if (v < 0.0) return 0.0;
-    if (v > 1.0) return 1.0;
+    if (v < 0.0) return 0.0f;
+    if (v > 1.0) return 1.0f;
 
-    return Math.Round(v, 4);
+    return (float)Math.Round(v, 4);
 }
 
 static int DayOfWeekAsInt(DayOfWeek dayOfWeek)
@@ -76,29 +96,29 @@ static int DayOfWeekAsInt(DayOfWeek dayOfWeek)
     return intFromEnum - 1;
 }
 
-static double MccRisk(string mcc)
+static float MccRisk(string mcc)
 {
-    Dictionary<string, double> dict = new()
+    Dictionary<string, float> dict = new()
     {
-        {"5411", 0.15},
-        {"5812", 0.30},
-        {"5912", 0.20},
-        {"5944", 0.45},
-        {"7801", 0.80},
-        {"7802", 0.75},
-        {"7995", 0.85},
-        {"4511", 0.35},
-        {"5311", 0.25},
-        {"5999", 0.50}
+        {"5411", 0.15f},
+        {"5812", 0.30f},
+        {"5912", 0.20f},
+        {"5944", 0.45f},
+        {"7801", 0.80f},
+        {"7802", 0.75f},
+        {"7995", 0.85f},
+        {"4511", 0.35f},
+        {"5311", 0.25f},
+        {"5999", 0.50f}
     };
 
     if (dict.TryGetValue(mcc, out var risk))
         return risk;
 
-    return 0.5;
+    return 0.5f;
 }
 
-record Response(bool approved, double fraud_score);
+record Response(bool approved, float fraud_score);
 
 record Request(
     string id,
@@ -109,8 +129,8 @@ record Request(
     LastTransaction? last_transaction
 );
 
-record Transaction(double amount, int installments, string requested_at);
-record Customer(double avg_amount, int tx_count_24h, string[] known_merchants);
-record Merchant(string id, string mcc, double avg_amount);
-record Terminal(bool is_online, bool card_present, double km_from_home);
-record LastTransaction(string timestamp, double km_from_current);
+record Transaction(float amount, int installments, string requested_at);
+record Customer(float avg_amount, int tx_count_24h, string[] known_merchants);
+record Merchant(string id, string mcc, float avg_amount);
+record Terminal(bool is_online, bool card_present, float km_from_home);
+record LastTransaction(string timestamp, float km_from_current);
