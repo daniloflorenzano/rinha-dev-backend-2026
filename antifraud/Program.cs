@@ -1,4 +1,3 @@
-using Antifraud;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
@@ -15,11 +14,35 @@ dataSourceBuilder.UseVector();
 var dataSource = dataSourceBuilder.Build();
 builder.Services.AddSingleton(dataSource);
 
-var warmupTask = Task.Run(async () => await DbWarmup.PrepareDatabase(dataSource));
+
+static bool IsDbReady(NpgsqlDataSource source)
+{
+    try
+    {
+        using var connection = source.OpenConnection();
+        var cmd = new NpgsqlCommand("SELECT COUNT(*) FROM items", connection);
+        using var reader = cmd.ExecuteReader();
+    
+        Int64 items = 0;
+        while (reader.Read())
+        {
+            items = reader.GetInt64(0);
+        }
+    
+        if (items == 3_000_000) return true;
+
+        Console.WriteLine("items: " + items);
+        return false;
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine("Banco de dados nao esta pronto: " + e.Message);
+        return false;
+    }
+}
 
 builder.Services.AddHealthChecks()
-    .AddCheck("DbWarmup", () => 
-        warmupTask.IsCompletedSuccessfully ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy());
+    .AddCheck("DbWarmup", () => IsDbReady(dataSource) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy());
 
 var app = builder.Build();
 
