@@ -21,7 +21,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.2"
+          cpus: "0.3"
           memory: "45MB"
 
   api02:
@@ -69,7 +69,7 @@ services:
           # aqui declarados é de 1 unidades de CPU e 350MB
           # de memória. A distribuição feita aqui é apenas
           # um exemplo – distribua como quiser.
-          cpus: "0.5"
+          cpus: "0.3"
           memory: "250MB"
 
 # O uso do modo `bridge` deve ser adequado à carga que será usada no teste.
