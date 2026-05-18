@@ -1,6 +1,6 @@
 services:
   api01: &api
-    image: rinha2026
+    image: docker.io/daniloflorenzano/rinha-2026-csharp-pgvector
     build:
       context: ..
       dockerfile: antifraud/Dockerfile
