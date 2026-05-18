@@ -20,7 +20,7 @@ static bool IsDbReady(NpgsqlDataSource source)
     try
     {
         using var connection = source.OpenConnection();
-        var cmd = new NpgsqlCommand("SELECT COUNT(*) FROM items", connection);
+        var cmd = new NpgsqlCommand("SELECT COUNT(id) FROM items", connection);
         using var reader = cmd.ExecuteReader();
     
         Int64 items = 0;
