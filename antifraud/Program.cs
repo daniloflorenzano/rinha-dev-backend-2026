@@ -12,13 +12,38 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") ??
-    "Username=postgres;Password=senha;Host=localhost;Port=5431;Database=postgres;Pooling=true;MaxPoolSize=50;Connection Lifetime=0;";
+                       "Username=postgres;Password=senha;Host=localhost;Port=5431;Database=postgres;Pooling=true;MaxPoolSize=50;Connection Lifetime=0;";
 
 var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
 dataSourceBuilder.UseVector();
 
 var dataSource = dataSourceBuilder.Build();
 builder.Services.AddSingleton(dataSource);
+
+builder.Services.AddHealthChecks()
+    .AddCheck("DbWarmup", () => IsDbReady(dataSource) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy());
+
+var app = builder.Build();
+
+app.MapHealthChecks("/ready");
+
+app.MapPost("/fraud-score", async (Request req, [FromServices] NpgsqlDataSource source) =>
+{
+    const int timeLimitMs = 1_950;
+    using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeLimitMs));
+    try
+    {
+        var res = await Fetch(req, source, cts.Token);
+        return Results.Ok(res);
+    }
+    catch (OperationCanceledException)
+    {
+        return Results.Ok(new Response(true, 0.0f));
+    }
+});
+
+app.Run();
+return;
 
 static bool IsDbReady(NpgsqlDataSource source)
 {
@@ -34,15 +59,10 @@ static bool IsDbReady(NpgsqlDataSource source)
     }
 }
 
-builder.Services.AddHealthChecks()
-    .AddCheck("DbWarmup", () => IsDbReady(dataSource) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy());
-
-var app = builder.Build();
-
-app.MapHealthChecks("/ready");
-
-app.MapPost("/fraud-score", async (Request req, [FromServices] NpgsqlDataSource source) =>
+static async Task<Response> Fetch(Request req, NpgsqlDataSource source, CancellationToken ct)
 {
+    ct.ThrowIfCancellationRequested();
+
     const int MaxAmount = 10000;
     const int MaxInsallments = 12;
     const int AmountVsAvgRatio = 10;
@@ -69,30 +89,27 @@ app.MapPost("/fraud-score", async (Request req, [FromServices] NpgsqlDataSource 
     vector[12] = MccRisk(req.Merchant.Mcc);
     vector[13] = Limitar(req.Merchant.AvgAmount, MaxMerchantAvgAmount);
 
-    await using var connection = await dataSource.OpenConnectionAsync();
-    var cmd = new NpgsqlCommand("SELECT label FROM items ORDER BY vector <-> $1 LIMIT 5", connection)
+    await using var connection = await source.OpenConnectionAsync(ct);
+    await using var cmd = new NpgsqlCommand("SELECT label FROM items ORDER BY vector <-> $1 LIMIT 5", connection)
     {
-        Parameters = { new() { Value = new Vector(vector)}}
+        Parameters = { new() { Value = new Vector(vector) } }
     };
 
     if (!cmd.IsPrepared)
-        await cmd.PrepareAsync();
+        await cmd.PrepareAsync(ct);
 
     var fraudNeighbors = 0f;
-    await using var reader = await cmd.ExecuteReaderAsync();
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-    while (await reader.ReadAsync())
+    while (await reader.ReadAsync(ct))
     {
         if (reader.GetString(0).Trim() == "fraud")
             fraudNeighbors++;
     }
 
     var score = fraudNeighbors / 5;
-    var res = new Response(score < 0.6, score);
-    return Results.Ok(res);
-});
-
-app.Run();
+    return new Response(score < 0.6, score);
+}
 
 static float Limitar(float amount, int max)
 {
@@ -119,7 +136,10 @@ static float MccRisk(string mcc) => mcc switch
     _ => 0.5f
 };
 
-public record Response(bool Approved, [property: JsonPropertyName("fraud_score")]float FraudScore);
+public record Response(
+    bool Approved,
+    [property: JsonPropertyName("fraud_score")]
+    float FraudScore);
 
 public record Request(
     string Id,
@@ -127,16 +147,46 @@ public record Request(
     Customer Customer,
     Merchant Merchant,
     Terminal Terminal,
-    [property: JsonPropertyName("last_transaction")]LastTransaction? LastTransaction
+    [property: JsonPropertyName("last_transaction")]
+    LastTransaction? LastTransaction
 );
 
-public record Transaction(float Amount, int Installments, [property: JsonPropertyName("requested_at")] string RequestedAt);
-public record Customer([property: JsonPropertyName("avg_amount")] float AvgAmount, [property: JsonPropertyName("tx_count_24h")] int TxCount24h, [property: JsonPropertyName("known_merchants")] string[] KnownMerchants);
-public record Merchant(string Id, string Mcc, [property: JsonPropertyName("avg_amount")] float AvgAmount);
-public record Terminal([property: JsonPropertyName("is_online")] bool IsOnline, [property: JsonPropertyName("card_present")] bool CardPresent, [property: JsonPropertyName("km_from_home")] float KmFromHome);
-public record LastTransaction(string Timestamp, [property: JsonPropertyName("km_from_current")] float KmFromCurrent);
+public record Transaction(
+    float Amount,
+    int Installments,
+    [property: JsonPropertyName("requested_at")]
+    string RequestedAt);
+
+public record Customer(
+    [property: JsonPropertyName("avg_amount")]
+    float AvgAmount,
+    [property: JsonPropertyName("tx_count_24h")]
+    int TxCount24h,
+    [property: JsonPropertyName("known_merchants")]
+    string[] KnownMerchants);
+
+public record Merchant(
+    string Id,
+    string Mcc,
+    [property: JsonPropertyName("avg_amount")]
+    float AvgAmount);
+
+public record Terminal(
+    [property: JsonPropertyName("is_online")]
+    bool IsOnline,
+    [property: JsonPropertyName("card_present")]
+    bool CardPresent,
+    [property: JsonPropertyName("km_from_home")]
+    float KmFromHome);
+
+public record LastTransaction(
+    string Timestamp,
+    [property: JsonPropertyName("km_from_current")]
+    float KmFromCurrent);
 
 [JsonSerializable(typeof(Request))]
 [JsonSerializable(typeof(Response))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
-internal partial class AppJsonSerializerContext : JsonSerializerContext { }
+internal partial class AppJsonSerializerContext : JsonSerializerContext
+{
+}
