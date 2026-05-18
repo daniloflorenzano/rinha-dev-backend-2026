@@ -22,6 +22,6 @@ gunzip -c /var/lib/postgresql/data_import/references.csv.gz | \
 # por isso o valor abaixo
 # https://github.com/pgvector/pgvector#ivfflat
 echo "[INIT] Criando index IVFFlat"
-psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "CREATE INDEX ON items USING ivfflat (vector vector_l2_ops) WITH (lists = 300);"
+psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "CREATE INDEX ON items USING ivfflat (vector vector_l2_ops) WITH (lists = 400);"
 
 echo "[INIT] Carga inicial concluída com sucesso!"
