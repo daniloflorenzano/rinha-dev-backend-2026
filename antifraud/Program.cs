@@ -82,6 +82,8 @@ app.MapPost("/fraud-score", async ([FromBody]Request req, [FromServices]NpgsqlDa
         Parameters = { new() { Value = new Vector(vector)}}
     };
 
+    await cmd.PrepareAsync();
+
     var fraudNeighbors = 0f;
     await using var reader = await cmd.ExecuteReaderAsync();
 
