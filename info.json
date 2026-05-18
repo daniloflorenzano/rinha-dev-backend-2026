@@ -1,0 +1,16 @@
+{
+    "participants": [
+        "Danilo Maia Florenzano"
+    ],
+    "social": [
+        "https://github.com/daniloflorenzano/",
+        "https://www.linkedin.com/in/daniloflorenzano"
+    ],
+    "source-code-repo": "https://github.com/daniloflorenzano/rinha-dev-backend-2026",
+    "stack": [
+        "c#",
+        "postgres",
+        "nginx"
+    ],
+    "open_to_work": false
+}
