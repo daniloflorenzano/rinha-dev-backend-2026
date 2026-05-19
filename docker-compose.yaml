@@ -1,9 +1,6 @@
 services:
   api01: &api
     image: docker.io/daniloflorenzano/rinha-2026-csharp-pgvector
-    build:
-      context: ..
-      dockerfile: antifraud/Dockerfile
     hostname: api01
     environment:
       - DB_CONNECTION_STRING=Username=admin;Password=123;Host=db;Database=postgres;Pooling=true;Maximum Pool Size=10;Connection Lifetime=0;No Reset On Close=true;
